@@ -1,0 +1,434 @@
+---
+title: "Funnel Analysis"
+author: "Mitul Shah"
+date: "12/28/2016"
+output: pdf_document
+---
+
+Let's load the required libraries first.
+```{r}
+## Loading the required libraries
+library(magrittr)
+library(dplyr)
+library(ggplot2)
+```
+
+## Loading all the datasets
+
+
+```{r}
+## Loading all datasets 
+user_table <- read.csv("user_table.csv")
+home_page_table <- read.csv("home_page_table.csv")
+search_page_table <- read.csv("search_page_table.csv")
+payment_page_table <- read.csv("payment_page_table.csv")
+payment_confirmation_table <- read.csv("payment_confirmation_table.csv")
+
+```
+
+Now, let's try to merge all the datasets without losing any users.
+
+```{r}
+## Merging all datasets without losing any user
+data <- merge(user_table, home_page_table, by = "user_id")
+data <- merge(data, search_page_table, by = "user_id", all.x = TRUE)
+data <- merge(data, payment_page_table, by = "user_id", all.x = TRUE)
+data <- merge(data, payment_confirmation_table, by = "user_id", all.x = TRUE)
+
+```
+
+Now, let's give relevant names to all the columns.
+
+```{r}
+## Renaming the columns
+colnames(data) <- c("user_id", "date", "device", "sex", "home_page", "search_page", "payment_page", "payment_confirmation_page")
+
+```
+
+Now, let's set all the values in the home page column to 1 as everyone visited this page. 
+
+```{r}
+## Setting home_page variable to 1 throughout the column
+data$home_page <- 1
+```
+
+Now, let's set search page, payment page and payment confirmation page values to 0 for those users who did not visit these pages. 
+
+```{r}
+## Setting search_page variable to 0 for people who did not visit this page
+data$search_page <- as.character(data$search_page)
+data$search_page[is.na(data$search_page)] = "0"
+
+## Setting payment_page variable to 0 for people who did not visit this page
+data$payment_page <- as.character(data$payment_page)
+data$payment_page[is.na(data$payment_page)] = "0"
+
+## Setting payment_confirmation_page variable to 0 for people who did not visit this page
+data$payment_confirmation_page <- as.character(data$payment_confirmation_page)
+data$payment_confirmation_page[is.na(data$payment_confirmation_page)] = "0"
+```
+
+We can also set search page, payment page and payment confirmation page values to 1 for those users who visited these pages. 
+
+```{r}
+## Setting search_page, payment_page and payment_confirmation_page to 1 for people who visited these pages
+data$search_page <- ifelse(data$search_page == "0", 0, 1)
+data$payment_page <- ifelse(data$payment_page == "0", 0, 1)
+data$payment_confirmation_page <- ifelse(data$payment_confirmation_page == "0", 0, 1)
+```
+
+Now, let's check the structure and the summary of the data.
+
+```{r}
+## Viewing the structure of the data
+str(data)
+
+## Checking the summary 
+summary(data)
+```
+
+We need to change the mode of the Date variable to date.
+
+```{r}
+## Changing the mode of date variable
+data$date <- as.Date(data$date, format = "%Y-%m-%d")
+```
+
+## Assessing Data Quality
+
+
+```{r}
+## Are there duplicates?
+length(unique(data$user_id)) == length(data$user_id) 
+
+## Are there any users for which data says that they visited the payment_confirmation_page but not the payment_page?
+data[which(data$payment_page == 0 
+                         & data$payment_confirmation_page == 1), ]
+
+## Are there any users for which data says that they visited the payment_page but not the search_page?
+data[which(data$search_page == 0 
+           & data$payment_page == 1), ]
+
+## Are there any users for which data says that they visited the search_page but not the home_page?
+data[which(data$home_page == 0 
+           & data$search_page == 1), ]
+```
+
+The data quality looks good. 
+
+## Defining New Users
+
+Let's define the new users as the users who came to the site after 2015-04-01.
+
+```{r}
+## Function to define new users
+define_new_user <- function(date){
+  if(date >= "2015-04-01")
+    return("New")
+  if(date < "2015-04-01")
+    return("Old")
+  else
+    return(NA)
+}
+```
+
+Now, let's create a new column indicating whether the user is a new user or an old one. 
+
+```{r}
+## Creating a new column user_type
+data$user_type <- sapply(data$date, define_new_user)
+```
+
+## Full picture of Funnel for Desktop users
+
+
+First, let's take all the desktop users by subsetting the data.
+
+```{r}
+## Subsetting desktop users
+desktop_users <- data %>% filter(device == "Desktop")
+```
+
+Now, let's try to analyze the overall conversion rate for the Desktop users by date and visualize them (both old users and the new users).
+
+```{r}
+## Conversion rate for Desktop users by date
+desktop_converted_by_date <- desktop_users %>% 
+                              group_by(date) %>% 
+                              summarise(conversion_rate =  mean(payment_confirmation_page))
+
+## Creating a variable for user type
+desktop_converted_by_date$user_type <- sapply(desktop_converted_by_date$date, define_new_user)
+
+## Visualizing conversion rate by date
+ggplot(desktop_converted_by_date,
+       aes(date, conversion_rate, color = user_type)) + 
+       geom_point() +
+       stat_smooth() +
+       ggtitle("Conversion rate for Desktop Users by date") +
+       theme(plot.title = element_text(size = 12, face = "bold"))
+```
+
+There seems to be a strange unusual behaviour amongst the new users. But overall, the conversion rate has been decreasing heavily since 1st March. 
+
+Now, let's try to compare the conversion rate between the old users and the new users and try to find out whether the results are significant. We can use t-test in order to do this. 
+
+```{r}
+## Applying t-test to compare the conversion rate for old users and the new users
+t.test(desktop_converted_by_date$conversion_rate[desktop_converted_by_date$user_type == "Old"], desktop_converted_by_date$conversion_rate[desktop_converted_by_date$user_type == "New"])
+
+```
+
+We see that the conversion rate for old users is 0.0028 while that for the new users is only 0.0014. Moreover, the p-value of less than 0.05 means that the results are not just by chance. Definitely, there is something wrong with the new Desktop users. 
+
+Let's try to investigate this further. 
+
+We can find out during which phase of the funnel the site is losing more users. To do this, we need to see how many users visiting the payment page also visited the payment confirmation page, how many users visiting the search page also visited the payment page and how many users who visited the home page also visited the search page. 
+
+Let's start from analyzing the number of users who visited payment confirmation page, given that they visited the payment page and visualize their results. 
+
+```{r}
+## Desktop users visiting payment page
+desktop_payment_page_visitors <- desktop_users %>% filter(payment_page == 1)
+
+## Payment page to payment_confirmation page
+desktop_paymentpagevisitors_converted_by_date <- desktop_payment_page_visitors %>% 
+  group_by(date) %>% 
+  summarise(conversion_rate = mean(payment_confirmation_page))
+
+## Creating a variable for new user
+desktop_paymentpagevisitors_converted_by_date$user_type <- sapply(desktop_paymentpagevisitors_converted_by_date$date, define_new_user)
+
+## Visualizing conversion rate (Payment page to payment_confirmation page Desktop Users)
+ggplot(desktop_paymentpagevisitors_converted_by_date,
+       aes(date, conversion_rate, color = user_type)) + 
+       geom_point() +
+       stat_smooth() +
+       ggtitle("Payment Page to Payment Confirmation Page Desktop Users") +
+       theme(plot.title = element_text(size = 10, face = "bold"))
+
+```
+
+Again, visualizing these users gives strange results. The conversion rate seems to be almost constant for the old users while the new users seem to be behaving strangely. The reason for this also can be insufficient data for the new users. 
+
+Now, let's try to compare the conversion rates of these payment page visiting Desktop users using t-test. 
+
+```{r}
+## Comparing new users and old users (Payment page to payment_confirmation page)
+t.test(desktop_paymentpagevisitors_converted_by_date$conversion_rate[desktop_paymentpagevisitors_converted_by_date$user_type == "Old"], desktop_paymentpagevisitors_converted_by_date$conversion_rate[desktop_paymentpagevisitors_converted_by_date$user_type == "New"])
+
+```
+
+The results say that the conversion of new users is much more than the old users (almost 80% more). But the p-value of 0.1172 (>0.05) says that these results might just be by chance.
+
+Now, let's analyze the number of users who visited payment page, given that they visited the search page and visualize their results. 
+
+```{r}
+## Desktop users visiting search page
+desktop_search_page_visitors <- desktop_users %>% filter(search_page == 1)
+
+## Search page to Payment page Desktop users
+desktop_searchpagevisitors_visitingpaymentpage_by_date <- desktop_search_page_visitors %>% 
+  group_by(date) %>% 
+  summarise(ratio_paymentpagevisitors = mean(payment_page))
+
+## Creating a variable for new user
+desktop_searchpagevisitors_visitingpaymentpage_by_date$user_type <- sapply(desktop_searchpagevisitors_visitingpaymentpage_by_date$date, define_new_user)
+
+## Visualizing Desktop users who visited payment page given they visited the search page
+ggplot(desktop_searchpagevisitors_visitingpaymentpage_by_date,
+       aes(date, ratio_paymentpagevisitors, color = user_type)) + 
+  geom_point() +
+  stat_smooth() +
+  ggtitle("Search Page to Payment Page Desktop Users") +
+  theme(plot.title = element_text(size = 12, face = "bold"))
+
+```
+
+From the graph, it seems that there is definitely something wrong with the search page as the number of users visiting the payment page after visiting the search page have decreased tremendously since mid of February. The machine learning software engineers definitely need to work on showing better search results to the users in order to prevent this in future. 
+
+Now, let's try to confirm these results by using t-test.
+
+```{r}
+## Comparing new users and old users (Search Page to Payment Page)
+t.test(desktop_searchpagevisitors_visitingpaymentpage_by_date$ratio_paymentpagevisitors[desktop_searchpagevisitors_visitingpaymentpage_by_date$user_type == "Old"], 
+       desktop_searchpagevisitors_visitingpaymentpage_by_date$ratio_paymentpagevisitors[desktop_searchpagevisitors_visitingpaymentpage_by_date$user_type == "New"])
+
+```
+
+The t-test shows the opposite results but this might just be due to insufficient data for new users (or the way we have chose to define the new users). The graph clearly shows that there is something wrong with the search page. 
+
+Now, let's try to analyze the users who visited the search page, given that they visited the home page and try to visualize them.
+
+```{r}
+## Home page to Search page Desktop Users
+home_to_searchpage_desktop_users <- desktop_users %>% 
+  group_by(date) %>% 
+  summarise(ratio_searchpagevisitors = mean(search_page))
+
+## Creating a variable for new user
+home_to_searchpage_desktop_users$user_type <- sapply(home_to_searchpage_desktop_users$date, define_new_user)
+
+## Home Page to Search Page visiting Desktop Users
+ggplot(home_to_searchpage_desktop_users,
+       aes(date, ratio_searchpagevisitors, color = user_type)) + 
+  geom_point() +
+  stat_smooth() +
+  ggtitle("Home Page to Search page Desktop Users") +
+  theme(plot.title = element_text(size = 12, face = "bold"))
+
+
+```
+
+We see that the number of users visiting the search page has increased for the new users. So the UI team is definitely doing well.
+
+Let's confirm these results by using t-test.
+
+```{r}
+## Comparing new users and old users (Home page to Search page)
+t.test(home_to_searchpage_desktop_users$ratio_searchpagevisitors[home_to_searchpage_desktop_users$user_type == "Old"],
+       home_to_searchpage_desktop_users$ratio_searchpagevisitors[home_to_searchpage_desktop_users$user_type == "New"])
+
+```
+
+Even the t-test confirm our result. But again the p-value of 0.45 (>0.05) says that our results might just be by chance. 
+
+
+
+# Overall, I would say that the site is losing most of the Desktop users at the Search Page. The search results shown to the users need to be improved.
+
+
+
+## Mobile Users
+
+Now, let's use the similar approach for the mobile users.
+
+First, let's subset all the mobile users from the data.
+
+```{r}
+## Subsetting mobile users
+mobile_users <- data %>% filter(device == "Mobile")
+
+```
+
+Now, let's try to visualize the overall conversion rate for the mobile users.
+
+```{r}
+## Conversion rate for Mobile users by date
+mobile_converted_by_date <- mobile_users %>% 
+  group_by(date) %>% 
+  summarise(conversion_rate = mean(payment_confirmation_page))
+
+## Creating a variables for new user
+mobile_converted_by_date$user_type <- sapply(mobile_converted_by_date$date, define_new_user)
+
+## Visualizing conversion rate by date
+ggplot(mobile_converted_by_date,
+       aes(date, conversion_rate, color = user_type)) + 
+  geom_point() +
+  stat_smooth() +
+  ggtitle("Conversion rate for Mobile Users by date") +
+  theme(plot.title = element_text(size = 12, face = "bold"))
+```
+
+The results show that the conversion rate for the mobile users has decreased almost continuously and has got worse. 
+
+Let's try to verify these results using t-test.
+
+```{r}
+## Applying t-test to compare the conversion rate for old users and the new users
+t.test(mobile_converted_by_date$conversion_rate[mobile_converted_by_date$user_type == "Old"], mobile_converted_by_date$conversion_rate[mobile_converted_by_date$user_type == "New"])
+
+```
+
+The conversion rate for the old users is 0.012 while that of new users is 0.003. Both these values of conversion rates are much higher than that of the corresponding group's Desktop users. Maybe the mobile app developers are doing a good job at the company!
+
+Let's try to investigate this further.
+
+```{r}
+## Mobile users visiting payment page
+mobile_payment_page_visitors <- mobile_users %>% filter(payment_page == 1)
+
+## Payment page to payment_confirmation page
+mobile_paymentpagevisitors_converted_by_date <- mobile_payment_page_visitors %>% 
+  group_by(date) %>% 
+  summarise(conversion_rate = mean(payment_confirmation_page))
+
+## Creating a variable for new user
+mobile_paymentpagevisitors_converted_by_date$user_type <- sapply(mobile_paymentpagevisitors_converted_by_date$date, define_new_user)
+
+## Visualizing conversion rate (Payment page to payment_confirmation page Mobile Users)
+ggplot(mobile_paymentpagevisitors_converted_by_date,
+       aes(date, conversion_rate, color = user_type)) + 
+  geom_point() +
+  stat_smooth() +
+  ggtitle("Payment Page to Payment Confirmation Page Mobile Users") +
+  theme(plot.title = element_text(size = 10, face = "bold"))
+
+## Comparing new users and old users (Payment page to payment_confirmation page)
+t.test(mobile_paymentpagevisitors_converted_by_date$conversion_rate[mobile_paymentpagevisitors_converted_by_date$user_type == "Old"], mobile_paymentpagevisitors_converted_by_date$conversion_rate[mobile_paymentpagevisitors_converted_by_date$user_type == "New"])
+
+
+```
+
+The t-test says that the new users have a bit lower conversion rate after they visited the payment page. But the p-value of 0.163 (>0.05) indicates that these results might just be by chance.
+
+```{r}
+## Mobile users visiting search page
+mobile_search_page_visitors <- mobile_users %>% filter(search_page == 1)
+
+## Search page to Payment page Mobile users
+mobile_searchpagevisitors_visitingpaymentpage_by_date <- mobile_search_page_visitors %>% 
+  group_by(date) %>% 
+  summarise(ratio_paymentpagevisitors = mean(payment_page))
+
+## Creating a variable for new user
+mobile_searchpagevisitors_visitingpaymentpage_by_date$user_type <- sapply(mobile_searchpagevisitors_visitingpaymentpage_by_date$date, define_new_user)
+
+## Visualizing Mobile users who visited payment page given they visited the search page
+ggplot(mobile_searchpagevisitors_visitingpaymentpage_by_date,
+       aes(date, ratio_paymentpagevisitors, color = user_type)) + 
+  geom_point() +
+  stat_smooth() +
+  ggtitle("Search Page to Payment Page Mobile Users") +
+  theme(plot.title = element_text(size = 12, face = "bold"))
+
+## Comparing new users and old users (Search Page to Payment Page)
+t.test(mobile_searchpagevisitors_visitingpaymentpage_by_date$ratio_paymentpagevisitors[mobile_searchpagevisitors_visitingpaymentpage_by_date$user_type == "Old"], 
+       mobile_searchpagevisitors_visitingpaymentpage_by_date$ratio_paymentpagevisitors[mobile_searchpagevisitors_visitingpaymentpage_by_date$user_type == "New"])
+
+```
+
+
+The plot as well as the t-test results indicate less percentage of users visiting payment page after they have visited the search page. 
+
+
+```{r}
+## Home page to Search page Mobile Users
+home_to_searchpage_mobile_users <- mobile_users %>% 
+  group_by(date) %>% 
+  summarise(ratio_searchpagevisitors = mean(search_page))
+
+## Creating a variable for new user
+home_to_searchpage_mobile_users$user_type <- sapply(home_to_searchpage_mobile_users$date, define_new_user)
+
+## Home Page to Search Page visiting Mobile Users
+ggplot(home_to_searchpage_mobile_users,
+       aes(date, ratio_searchpagevisitors, color = user_type)) + 
+  geom_point() +
+  stat_smooth() +
+  ggtitle("Home Page to Search page Mobile Users") +
+  theme(plot.title = element_text(size = 12, face = "bold"))
+
+
+t.test(home_to_searchpage_mobile_users$ratio_searchpagevisitors[home_to_searchpage_mobile_users$user_type == "Old"],
+       home_to_searchpage_mobile_users$ratio_searchpagevisitors[home_to_searchpage_mobile_users$user_type == "New"])
+
+
+
+```
+
+The plot and the t-test clearly indicates that most of the users are not going further after visiting the home page. There is a steep drop seen in the graph. Moreover, the t-test also gives a p-value of less than 0.05 which indicates that these results are not just by chance. So the home page needs a lot of work for the mobile users. 
+
+
+# Thus, for the Mobile Users, I would say that the funnel is losing most of its users on the home page. While for the Desktop Users, it was the search page. 
